@@ -1,3 +1,17 @@
+# minimum amount of padding in bases required to evaluate INS events
+MIN_INS_PAD <- 300
+
+SMALL_CNV_MAX <- 4000
+LARGE_CNV_MIN <- 6000
+
+# min and max expected PE sequencing insert size (space between reads)
+MIN_INSERT_SIZE <- 300
+MAX_INSERT_SIZE <- 700
+READ_SIZE <- 150
+
+# minimum amount normalized RD should deviate from 1 to be in support of a CNV
+MIN_RD_DEVIATION <- 0.3
+
 #' Structural variant evidence files
 #'
 #' Classes to handle structural variant evidence files used in the GATK-SV
@@ -201,6 +215,196 @@ c.svevidence <- function(...) {
         ),
         class = "svevidence"
     )
+}
+
+#' Does an SV have supporting evidence
+#'
+#' Check the evidence for an SV to see if the call is supported.
+#'
+#' The method for [`svevidence`] will check if an SV is supported by PE, SR, or
+#' RD evidence.
+#'
+#' @param x Object that can be used to check SV support.
+#' @param sample_id ID of sample to check.
+#' @returns Does the SV have supporting evidence.
+#'
+#' @export
+supports_sv <- function(x, sample_id) {
+    UseMethod("supports_sv")
+}
+
+#' @export
+supports_sv.svevidence <- function(x, sample_id) {
+    stopifnot(is_string(sample_id))
+
+    region <- x$region
+    # enforce a padding of 5% so that we can capture SVs past the breakpoints
+    if (x$svtype == "INS" && (region$start - region$qstart + 1 < MIN_INS_PAD || region$qend - region$start + 1 < MIN_INS_PAD)) {
+        warning(sprintf("INS events require %d bases of padding", MIN_INS_PAD))
+        return(NA)
+    } else {
+        min_pad <- (region$end - region$start + 1) * 0.05
+        if (region$start - min_pad + 1 < region$qstart || region$end + min_pad > region$qend) {
+            warning("DUP/DEL/INV events require 5% padding")
+            return(NA)
+        }
+    }
+
+    # only the RD matrix has all samples regardless of discordant pairs or
+    # split reads
+    if (!sample_id %in% colnames(x$rd$mat)) {
+        warning(sprintf("'%s' does not have evidence", sample_id))
+        return(NA)
+    }
+
+    f <- switch(
+        x$svtype,
+        DUP = check_dup,
+        DEL = check_del,
+        INV = check_inv,
+        INS = check_ins
+    )
+
+    f(x, sample_id)
+}
+
+# PE evidence
+# If the read-pairs span the entire duplication (reference + additional
+# segment), then read-pairs will align to reference closer together than
+# expected. If one read in the pair is from the duplicated segment and the mate
+# is from the duplication, the reads will align in an inverted orientation.
+#
+# SR evidence
+# split reads at the right end of the duplicated segment
+#
+# RD evidence
+# possible increase in read depth
+check_dup <- function(x, sample_id) {
+    rcontig <- NULL
+    mcontig <- NULL
+    rstart <- NULL
+    mstart <- NULL
+    rstrand <- NULL
+    mstrand <- NULL
+
+    region <- x$region
+    pad <- (region$end - region$start + 1) * 0.05
+    pad_start <- region$start - pad
+    pad_end <- region$end + pad
+    # could be important to take the read length and orientation into account
+    pe <- x$pe$mat[sample_id == sample_id & rcontig == mcontig & rstart >= pad_start & mstart <= pad_end, ]
+    # RL read pairs
+    rl_pe <- pe[(rstrand == "-" & mstrand == "+")]
+    # read pairs closer together than expected
+    squished_pe <- pe[(rstrand == "+" & mstrand == "-" & mstart - (rstart + READ_SIZE) + 1 < MIN_INSERT_SIZE)] 
+    has_pe_support <- nrow(rl_pe) > 0 || nrow(squished_pe) > 0
+
+    rd <- x$rd
+    rd_ranges <- rd$ranges
+    rd_mat <- rd$mat
+    intervals <- pad_end >= S4Vectors::start(rd_ranges) & pad_start <= S4Vectors::end(rd_ranges)
+    if (any(intervals)) {
+        has_rd_support <- median(rd_mat[intervals, sample_id]) >= 1 + MIN_RD_DEVIATION
+    } else {
+        has_rd_support <- FALSE
+    }
+
+    sv_size <- region$end - region$start + 1
+    if (sv_size <= SMALL_CNV_MAX) {
+        return(has_pe_support)
+    } else if (sv_size > SMALL_CNV_MAX && sv_size < LARGE_CNV_MIN) {
+        return(has_pe_support || has_rd_support)
+    } else {
+        return(has_rd_support)
+    }
+}
+
+# PE evidence
+# read-pairs align farther apart than expected
+#
+# SR evidence
+# split reads at the delete breakpoints
+#
+# RD evidence
+# possible drop in read depth
+check_del <- function(x, sample_id) {
+    rcontig <- NULL
+    mcontig <- NULL
+    rstart <- NULL
+    mstart <- NULL
+    rstrand <- NULL
+    mstrand <- NULL
+
+    region <- x$region
+    pad <- (region$end - region$start + 1) * 0.05
+    pad_start <- region$start - pad
+    pad_end <- region$end + pad
+    # could be important to take the read length and orientation into account
+    pe <- x$pe$mat[sample_id == sample_id & rcontig == mcontig & rstart >= pad_start & mstart <= pad_end, ]
+    # read pairs farther apart than expected
+    expanded_pe <- pe[(rstrand == "+" & mstrand == "-" & mstart - (rstart + READ_SIZE) + 1 > MAX_INSERT_SIZE)] 
+    has_pe_support <- nrow(expanded_pe) > 0
+
+    rd <- x$rd
+    rd_ranges <- rd$ranges
+    rd_mat <- rd$mat
+    intervals <- pad_end >= S4Vectors::start(rd_ranges) & pad_start <= S4Vectors::end(rd_ranges)
+    if (any(intervals)) {
+        has_rd_support <- median(rd_mat[intervals, sample_id]) <= 1 - MIN_RD_DEVIATION
+    } else {
+        has_rd_support <- FALSE
+    }
+
+    sv_size <- region$end - region$start + 1
+    if (sv_size <= SMALL_CNV_MAX) {
+        return(has_pe_support)
+    } else if (sv_size > SMALL_CNV_MAX && sv_size < LARGE_CNV_MIN) {
+        return(has_pe_support || has_rd_support)
+    } else {
+        return(has_rd_support)
+    }
+}
+
+# PE evidence
+# Read-pairs that cross from the reference segment to the inverted segment will
+# align in the wrong orientation (LR to LL or RR).
+check_inv <- function(x, sample_id) {
+    rcontig <- NULL
+    mcontig <- NULL
+    rstart <- NULL
+    mstart <- NULL
+    rstrand <- NULL
+    mstrand <- NULL
+
+    region <- x$region
+    pad <- (region$end - region$start + 1) * 0.05
+    pad_start <- region$start - pad
+    pad_end <- region$end + pad
+    # could be important to take the read length and orientation into account
+    pe <- x$pe$mat[sample_id == sample_id & rcontig == mcontig & rstart >= pad_start & mstart <= pad_end, ]
+    # LL/RR read pairs
+    ll_or_rr_pe <- pe[(rstrand == "+" & mstrand == "+") | (rstrand == "-" & mstrand == "-")]
+
+    nrow(ll_or_rr_pe) > 0
+}
+
+# SR evidence
+# split reads around the breakpoint of the insertion
+check_ins <- function(x, sample_id) {
+    side <- NULL
+    pos <- NULL
+    count <- NULL
+
+    region <- x$region
+    left_pad_start <- region$start - MIN_INS_PAD
+    left_pad_end <- region$start + MIN_INS_PAD
+    right_pad_start <- region$end - MIN_INS_PAD
+    right_pad_end <- region$end + MIN_INS_PAD
+    sr <- x$sr$mat[sample_id == sample_id, ]
+    left_bp_sr <- sr[pos >= left_pad_start & pos <= left_pad_end & side == "right" & count > 1, ]
+    right_bp_sr <- sr[pos >= right_pad_start & pos <= right_pad_end & side == "left" & count > 1, ]
+
+    nrow(left_bp_sr) > 0 && nrow(right_bp_sr) > 0
 }
 
 new_svevidence <- function(contig, start, end, pe, sr, rd, svtype, pad, sr_pad) {

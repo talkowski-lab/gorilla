@@ -57,3 +57,26 @@ new_svtrio <- function(evidence, child, father, mother) {
 
     structure(list(evidence = evidence, trio = trio), class = "svtrio")
 }
+
+#' Test if an SV is de novo
+#'
+#' @description
+#' `is_denovo` is a generic, but it only really works for an
+#' [`svtrio`][svtrio()] object. It uses some low effort heuristics to check
+#' whether the PE/SR/RD evidence for an SV supports a de novo status. It is
+#' only possible to confirm the de novo status of a variant if the evidence for
+#' all members of the trio, i.e. child, mother, father, are available.
+#'
+#' @param x An object to test for de novo status.
+#' @returns Is the object predicted to represent a de novo event?
+#' @export
+is_denovo <- function(x) {
+    UseMethod("is_denovo")
+}
+
+#' @export
+is_denovo.svtrio <- function(x) {
+    supports_sv(x$evidence, x$trio$child) &&
+        !supports_sv(x$evidence, x$trio$father) &&
+        !supports_sv(x$evidence, x$trio$mother)
+}
