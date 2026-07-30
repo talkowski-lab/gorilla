@@ -101,6 +101,8 @@ new_pe_plotter <- function(x) {
     rstart <- NULL
     mstart <- NULL
     sample_id <- NULL
+    pe_start <- NULL
+    pe_end <- NULL
 
     mat <- x$mat[
         rcontig == mcontig & rstart >= x$region$start & mstart <= x$region$end,
