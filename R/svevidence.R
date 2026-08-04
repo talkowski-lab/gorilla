@@ -1,5 +1,8 @@
 # minimum amount of padding in bases required to evaluate INS events
 MIN_INS_PAD <- 300
+MIN_SMALL_CNV_PAD <- 1000
+MIN_INV_PAD <- 1000
+MIN_LARGE_CNV_PAD_PROP <- 0.05
 
 SMALL_CNV_MAX <- 4000
 LARGE_CNV_MIN <- 6000
@@ -11,6 +14,10 @@ READ_SIZE <- 150
 
 # minimum amount normalized RD should deviate from 1 to be in support of a CNV
 MIN_RD_DEVIATION <- 0.3
+
+# maximum distance from a breakpoint that a PE read alignment can be to be
+# evaluated for supporting an event
+MAX_PE_BREAKPOINT_DIST <- 500
 
 #' Structural variant evidence files
 #'
@@ -238,16 +245,33 @@ supports_sv.svevidence <- function(x, sample_id) {
     stopifnot(is_string(sample_id))
 
     region <- x$region
-    # enforce a padding of 5% so that we can capture SVs past the breakpoints
-    if (x$svtype == "INS" && (region$start - region$qstart + 1 < MIN_INS_PAD || region$qend - region$start + 1 < MIN_INS_PAD)) {
+    svlen <- region$end - region$start + 1
+    start_pad <- region$start - region$qstart
+    end_pad <- region$qend - region$end
+    # it is assumed that start and end are always fully within qstart and qend
+    if (x$svtype == "INS" && (start_pad < MIN_INS_PAD || end_pad < MIN_INS_PAD)) {
         warning(sprintf("INS events require %d bases of padding", MIN_INS_PAD))
         return(NA)
-    } else {
-        min_pad <- (region$end - region$start + 1) * 0.05
-        if (region$start - min_pad + 1 < region$qstart || region$end + min_pad > region$qend) {
-            warning("DUP/DEL/INV events require 5% padding")
+    } else if (x$svtype == "DEL" || x$svtype == "DUP") {
+        if (svlen < LARGE_CNV_MIN) {
+            if (start_pad < MIN_SMALL_CNV_PAD || end_pad < MIN_SMALL_CNV_PAD) {
+                warning(sprintf("CNVs smaller than %d bases require %d bases of padding", LARGE_CNV_MIN, MIN_SMALL_CNV_PAD))
+                return(NA)
+            }
+        } else {
+            required_pad <- ceiling(svlen * MIN_LARGE_CNV_PAD_PROP)
+            if (start_pad < required_pad || end_pad < required_pad) {
+                warning(sprintf("CNVs equal to or larger than %d bases require %d%% padding", LARGE_CNV_MIN, ceiling(MIN_LARGE_CNV_PAD_PROP * 100)))
+                return(NA)
+            }
+        }
+    } else if (x$svtype == "INV") {
+        if (start_pad < MIN_INV_PAD || end_pad < MIN_INV_PAD) {
+            warning(sprintf("INVs events require %d bases of padding", MIN_INV_PAD))
             return(NA)
         }
+    } else {
+        stop(sprintf("unknown SV type: %s", x$svtype))
     }
 
     # only the RD matrix has all samples regardless of discordant pairs or
@@ -288,31 +312,34 @@ check_dup <- function(x, sample_id) {
     mstrand <- NULL
 
     region <- x$region
-    pad <- (region$end - region$start + 1) * 0.05
-    pad_start <- region$start - pad
-    pad_end <- region$end + pad
-    # could be important to take the read length and orientation into account
-    pe <- x$pe$mat[sample_id == sample_id & rcontig == mcontig & rstart >= pad_start & mstart <= pad_end, ]
+    target <- sample_id
+    pe_pad <- MAX_PE_BREAKPOINT_DIST
+    sample_pe <- x$pe$mat[sample_id == target & rcontig == mcontig, ]
+
+    # LR read pairs
+    lr_pe <- sample_pe[rstrand == "+" & mstrand == "-" & abs(rstart + READ_SIZE - region$start) <= pe_pad & abs(mstart - region$end) <= pe_pad, ]
     # RL read pairs
-    rl_pe <- pe[(rstrand == "-" & mstrand == "+")]
-    # read pairs closer together than expected
-    squished_pe <- pe[(rstrand == "+" & mstrand == "-" & mstart - (rstart + READ_SIZE) + 1 < MIN_INSERT_SIZE)] 
+    rl_pe <- sample_pe[rstrand == "-" & mstrand == "+" & abs(rstart - region$start) <= pe_pad & abs(mstart + READ_SIZE - region$end) <= pe_pad, ]
+    # LR read pairs closer together than expected
+    squished_pe <- lr_pe[mstart - (rstart + READ_SIZE) + 1 < MAX_INSERT_SIZE, ] 
     has_pe_support <- nrow(rl_pe) > 0 || nrow(squished_pe) > 0
 
+    rd_pad <- ceiling((region$end - region$start + 1) * MIN_LARGE_CNV_PAD_PROP)
+    rd_start <- region$start - rd_pad
+    rd_end <- region$end + rd_pad
     rd <- x$rd
     rd_ranges <- rd$ranges
-    rd_mat <- rd$mat
-    intervals <- pad_end >= S4Vectors::start(rd_ranges) & pad_start <= S4Vectors::end(rd_ranges)
+    intervals <- rd_start <= S4Vectors::end(rd_ranges) & rd_end >= S4Vectors::start(rd_ranges)
     if (any(intervals)) {
-        has_rd_support <- median(rd_mat[intervals, sample_id]) >= 1 + MIN_RD_DEVIATION
+        has_rd_support <- median(rd$mat[intervals, target]) >= 1 + MIN_RD_DEVIATION
     } else {
         has_rd_support <- FALSE
     }
 
-    sv_size <- region$end - region$start + 1
-    if (sv_size <= SMALL_CNV_MAX) {
+    svlen <- region$end - region$start + 1
+    if (svlen <= SMALL_CNV_MAX) {
         return(has_pe_support)
-    } else if (sv_size > SMALL_CNV_MAX && sv_size < LARGE_CNV_MIN) {
+    } else if (svlen > SMALL_CNV_MAX && svlen < LARGE_CNV_MIN) {
         return(has_pe_support || has_rd_support)
     } else {
         return(has_rd_support)
@@ -336,29 +363,31 @@ check_del <- function(x, sample_id) {
     mstrand <- NULL
 
     region <- x$region
-    pad <- (region$end - region$start + 1) * 0.05
-    pad_start <- region$start - pad
-    pad_end <- region$end + pad
-    # could be important to take the read length and orientation into account
-    pe <- x$pe$mat[sample_id == sample_id & rcontig == mcontig & rstart >= pad_start & mstart <= pad_end, ]
-    # read pairs farther apart than expected
-    expanded_pe <- pe[(rstrand == "+" & mstrand == "-" & mstart - (rstart + READ_SIZE) + 1 > MAX_INSERT_SIZE)] 
+    target <- sample_id
+    pe_pad <- MAX_PE_BREAKPOINT_DIST
+    sample_pe <- x$pe$mat[sample_id == target & rcontig == mcontig, ]
+
+    lr_pe <- sample_pe[rstrand == "+" & mstrand == "-" & abs(rstart + READ_SIZE - region$start) <= pe_pad & abs(mstart - region$end) <= pe_pad, ]
+    # LR read pairs farther apart than expected
+    expanded_pe <- lr_pe[mstart - (rstart + READ_SIZE) + 1 > MIN_INSERT_SIZE, ] 
     has_pe_support <- nrow(expanded_pe) > 0
 
+    rd_pad <- ceiling((region$end - region$start + 1) * MIN_LARGE_CNV_PAD_PROP)
+    rd_start <- region$start - rd_pad
+    rd_end <- region$end + rd_pad
     rd <- x$rd
     rd_ranges <- rd$ranges
-    rd_mat <- rd$mat
-    intervals <- pad_end >= S4Vectors::start(rd_ranges) & pad_start <= S4Vectors::end(rd_ranges)
+    intervals <- rd_start <= S4Vectors::end(rd_ranges) & rd_end >= S4Vectors::start(rd_ranges)
     if (any(intervals)) {
-        has_rd_support <- median(rd_mat[intervals, sample_id]) <= 1 - MIN_RD_DEVIATION
+        has_rd_support <- median(rd$mat[intervals, target]) <= 1 - MIN_RD_DEVIATION
     } else {
         has_rd_support <- FALSE
     }
 
-    sv_size <- region$end - region$start + 1
-    if (sv_size <= SMALL_CNV_MAX) {
+    svlen <- region$end - region$start + 1
+    if (svlen <= SMALL_CNV_MAX) {
         return(has_pe_support)
-    } else if (sv_size > SMALL_CNV_MAX && sv_size < LARGE_CNV_MIN) {
+    } else if (svlen > SMALL_CNV_MAX && svlen < LARGE_CNV_MIN) {
         return(has_pe_support || has_rd_support)
     } else {
         return(has_rd_support)
@@ -377,15 +406,14 @@ check_inv <- function(x, sample_id) {
     mstrand <- NULL
 
     region <- x$region
-    pad <- (region$end - region$start + 1) * 0.05
-    pad_start <- region$start - pad
-    pad_end <- region$end + pad
-    # could be important to take the read length and orientation into account
-    pe <- x$pe$mat[sample_id == sample_id & rcontig == mcontig & rstart >= pad_start & mstart <= pad_end, ]
-    # LL/RR read pairs
-    ll_or_rr_pe <- pe[(rstrand == "+" & mstrand == "+") | (rstrand == "-" & mstrand == "-")]
+    target <- sample_id
+    pad <- MAX_PE_BREAKPOINT_DIST
+    sample_pe <- x$pe$mat[sample_id == target & rcontig == mcontig, ]
+    # LL read pairs
+    ll_pe <- sample_pe[rstrand == "+" & mstrand == "+" & abs(rstart + READ_SIZE - region$start) <= pad & abs(mstart + READ_SIZE - region$end) <= pad, ]
+    rr_pe <- sample_pe[rstrand == "-" & mstrand == "-" & abs(rstart - region$start) <= pad & abs(mstart - region$end) <= pad, ]
 
-    nrow(ll_or_rr_pe) > 0
+    nrow(ll_pe) > 0 && nrow(rr_pe) > 0
 }
 
 # SR evidence
