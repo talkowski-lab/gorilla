@@ -1,5 +1,5 @@
 # minimum amount of padding in bases required to evaluate INS events
-MIN_INS_PAD <- 300
+MIN_INS_PAD <- 500
 MIN_SMALL_CNV_PAD <- 1000
 MIN_INV_PAD <- 1000
 
