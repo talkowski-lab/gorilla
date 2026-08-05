@@ -2,7 +2,6 @@
 MIN_INS_PAD <- 300
 MIN_SMALL_CNV_PAD <- 1000
 MIN_INV_PAD <- 1000
-MIN_LARGE_CNV_PAD_PROP <- 0.05
 
 SMALL_CNV_MAX <- 4000
 LARGE_CNV_MIN <- 6000
@@ -258,12 +257,6 @@ supports_sv.svevidence <- function(x, sample_id) {
                 warning(sprintf("CNVs smaller than %d bases require %d bases of padding", LARGE_CNV_MIN, MIN_SMALL_CNV_PAD))
                 return(NA)
             }
-        } else {
-            required_pad <- ceiling(svlen * MIN_LARGE_CNV_PAD_PROP)
-            if (start_pad < required_pad || end_pad < required_pad) {
-                warning(sprintf("CNVs equal to or larger than %d bases require %d%% padding", LARGE_CNV_MIN, ceiling(MIN_LARGE_CNV_PAD_PROP * 100)))
-                return(NA)
-            }
         }
     } else if (x$svtype == "INV") {
         if (start_pad < MIN_INV_PAD || end_pad < MIN_INV_PAD) {
@@ -324,12 +317,9 @@ check_dup <- function(x, sample_id) {
     squished_pe <- lr_pe[mstart - (rstart + READ_SIZE) + 1 < MAX_INSERT_SIZE, ] 
     has_pe_support <- nrow(rl_pe) > 0 || nrow(squished_pe) > 0
 
-    rd_pad <- ceiling((region$end - region$start + 1) * MIN_LARGE_CNV_PAD_PROP)
-    rd_start <- region$start - rd_pad
-    rd_end <- region$end + rd_pad
     rd <- x$rd
     rd_ranges <- rd$ranges
-    intervals <- rd_start <= S4Vectors::end(rd_ranges) & rd_end >= S4Vectors::start(rd_ranges)
+    intervals <- region$start <= S4Vectors::end(rd_ranges) & region$end >= S4Vectors::start(rd_ranges)
     if (any(intervals)) {
         has_rd_support <- median(rd$mat[intervals, target]) >= 1 + MIN_RD_DEVIATION
     } else {
@@ -372,12 +362,9 @@ check_del <- function(x, sample_id) {
     expanded_pe <- lr_pe[mstart - (rstart + READ_SIZE) + 1 > MIN_INSERT_SIZE, ] 
     has_pe_support <- nrow(expanded_pe) > 0
 
-    rd_pad <- ceiling((region$end - region$start + 1) * MIN_LARGE_CNV_PAD_PROP)
-    rd_start <- region$start - rd_pad
-    rd_end <- region$end + rd_pad
     rd <- x$rd
     rd_ranges <- rd$ranges
-    intervals <- rd_start <= S4Vectors::end(rd_ranges) & rd_end >= S4Vectors::start(rd_ranges)
+    intervals <- region$start <= S4Vectors::end(rd_ranges) & region$end >= S4Vectors::start(rd_ranges)
     if (any(intervals)) {
         has_rd_support <- median(rd$mat[intervals, target]) <= 1 - MIN_RD_DEVIATION
     } else {
