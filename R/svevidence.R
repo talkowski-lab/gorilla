@@ -248,9 +248,11 @@ supports_sv.svevidence <- function(x, sample_id) {
     start_pad <- region$start - region$qstart
     end_pad <- region$qend - region$end
     # it is assumed that start and end are always fully within qstart and qend
-    if (x$svtype == "INS" && (start_pad < MIN_INS_PAD || end_pad < MIN_INS_PAD)) {
-        warning(sprintf("INS events require %d bases of padding", MIN_INS_PAD))
-        return(NA)
+    if (x$svtype == "INS") {
+        if (start_pad < MIN_INS_PAD || end_pad < MIN_INS_PAD) {
+            warning(sprintf("INS events require %d bases of padding", MIN_INS_PAD))
+            return(NA)
+        }
     } else if (x$svtype == "DEL" || x$svtype == "DUP") {
         if (svlen < LARGE_CNV_MIN) {
             if (start_pad < MIN_SMALL_CNV_PAD || end_pad < MIN_SMALL_CNV_PAD) {
