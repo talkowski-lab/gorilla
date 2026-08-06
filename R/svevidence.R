@@ -1,9 +1,19 @@
 # minimum amount of padding in bases required to evaluate INS events
 MIN_INS_PAD <- 500
+# minimum amount of padding in bases required to evaluate CNV events
 MIN_SMALL_CNV_PAD <- 1000
+# minimum amount of padding in bases required to evaluate INV events
 MIN_INV_PAD <- 1000
 
+# maximum distance from an SV breakpoint that will be checked for supporting SR
+# evidence
+MAX_SR_BREAKPOINT_DIST <- 300
+# minimum number of split reads required at a position to use as evidence
+MIN_SR_SUPPORT <- 2
+
+# maximum size of CNV that will be evaluated with only PE/SR evidence
 SMALL_CNV_MAX <- 4000
+# minimum size of CNV that will be evaluated with only RD evidence
 LARGE_CNV_MIN <- 6000
 
 # min and max expected PE sequencing insert size (space between reads)
@@ -294,7 +304,7 @@ supports_sv.svevidence <- function(x, sample_id) {
 # is from the duplication, the reads will align in an inverted orientation.
 #
 # SR evidence
-# split reads at the right end of the duplicated segment
+# outward clipped reads
 #
 # RD evidence
 # possible increase in read depth
@@ -305,6 +315,10 @@ check_dup <- function(x, sample_id) {
     mstart <- NULL
     rstrand <- NULL
     mstrand <- NULL
+    contig <- NULL
+    pos <- NULL
+    count <- NULL
+    side <- NULL
 
     region <- x$region
     target <- sample_id
@@ -328,9 +342,14 @@ check_dup <- function(x, sample_id) {
         has_rd_support <- FALSE
     }
 
+    sample_sr <- x$sr$mat[sample_id == target & contig == x$region$contig & count >= MIN_SR_SUPPORT, ]
+    left_sr <- sample_sr[abs(x$region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
+    right_sr <- sample_sr[abs(x$region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
+    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0
+
     svlen <- region$end - region$start + 1
     if (svlen <= SMALL_CNV_MAX) {
-        return(has_pe_support)
+        return(has_pe_support || has_sr_support)
     } else if (svlen > SMALL_CNV_MAX && svlen < LARGE_CNV_MIN) {
         return(has_pe_support || has_rd_support)
     } else {
@@ -342,7 +361,7 @@ check_dup <- function(x, sample_id) {
 # read-pairs align farther apart than expected
 #
 # SR evidence
-# split reads at the delete breakpoints
+# inward clipped reads
 #
 # RD evidence
 # possible drop in read depth
@@ -353,6 +372,10 @@ check_del <- function(x, sample_id) {
     mstart <- NULL
     rstrand <- NULL
     mstrand <- NULL
+    contig <- NULL
+    pos <- NULL
+    count <- NULL
+    side <- NULL
 
     region <- x$region
     target <- sample_id
@@ -373,9 +396,14 @@ check_del <- function(x, sample_id) {
         has_rd_support <- FALSE
     }
 
+    sample_sr <- x$sr$mat[sample_id == target & contig == x$region$contig & count >= MIN_SR_SUPPORT, ]
+    left_sr <- sample_sr[abs(x$region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
+    right_sr <- sample_sr[abs(x$region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
+    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0
+
     svlen <- region$end - region$start + 1
     if (svlen <= SMALL_CNV_MAX) {
-        return(has_pe_support)
+        return(has_pe_support || has_sr_support)
     } else if (svlen > SMALL_CNV_MAX && svlen < LARGE_CNV_MIN) {
         return(has_pe_support || has_rd_support)
     } else {
@@ -413,15 +441,11 @@ check_ins <- function(x, sample_id) {
     count <- NULL
 
     region <- x$region
-    left_pad_start <- region$start - MIN_INS_PAD
-    left_pad_end <- region$start + MIN_INS_PAD
-    right_pad_start <- region$end - MIN_INS_PAD
-    right_pad_end <- region$end + MIN_INS_PAD
-    sr <- x$sr$mat[sample_id == sample_id, ]
-    left_bp_sr <- sr[pos >= left_pad_start & pos <= left_pad_end & side == "right" & count > 1, ]
-    right_bp_sr <- sr[pos >= right_pad_start & pos <= right_pad_end & side == "left" & count > 1, ]
+    sr <- x$sr$mat[sample_id == sample_id & count >= MIN_SR_SUPPORT, ]
+    left_sr <- sr[abs(region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
+    right_sr <- sr[abs(region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
 
-    nrow(left_bp_sr) > 0 && nrow(right_bp_sr) > 0
+    nrow(left_sr) > 0 && nrow(right_sr) > 0
 }
 
 new_svevidence <- function(contig, start, end, pe, sr, rd, svtype, pad, sr_pad) {
