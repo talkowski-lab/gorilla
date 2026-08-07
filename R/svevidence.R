@@ -7,7 +7,7 @@ MIN_INV_PAD <- 1000
 
 # maximum distance from an SV breakpoint that will be checked for supporting SR
 # evidence
-MAX_SR_BREAKPOINT_DIST <- 300
+MAX_SR_BREAKPOINT_DIST <- 150
 # minimum number of split reads required at a position to use as evidence
 MIN_SR_SUPPORT <- 2
 
@@ -345,7 +345,7 @@ check_dup <- function(x, sample_id) {
     sample_sr <- x$sr$mat[sample_id == target & contig == x$region$contig & count >= MIN_SR_SUPPORT, ]
     left_sr <- sample_sr[abs(x$region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
     right_sr <- sample_sr[abs(x$region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
-    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0
+    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0 && any(left_sr$pos <= right_sr$pos)
 
     svlen <- region$end - region$start + 1
     if (svlen <= SMALL_CNV_MAX) {
@@ -399,7 +399,7 @@ check_del <- function(x, sample_id) {
     sample_sr <- x$sr$mat[sample_id == target & contig == x$region$contig & count >= MIN_SR_SUPPORT, ]
     left_sr <- sample_sr[abs(x$region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
     right_sr <- sample_sr[abs(x$region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
-    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0
+    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0 && any(left_sr$pos <= right_sr$pos)
 
     svlen <- region$end - region$start + 1
     if (svlen <= SMALL_CNV_MAX) {
@@ -445,7 +445,7 @@ check_ins <- function(x, sample_id) {
     left_sr <- sr[abs(region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
     right_sr <- sr[abs(region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
 
-    nrow(left_sr) > 0 && nrow(right_sr) > 0
+    nrow(left_sr) > 0 && nrow(right_sr) > 0 && any(left_sr$pos <= right_sr$pos)
 }
 
 new_svevidence <- function(contig, start, end, pe, sr, rd, svtype, pad, sr_pad) {
