@@ -435,17 +435,22 @@ check_inv <- function(x, sample_id) {
 
 # SR evidence
 # split reads around the breakpoint of the insertion
+# Simple insertions will have right-clipped reads at the upstream breakpoint
+# and left-clipped reads at the downstream breakpoint. However, if there is
+# some target site duplication, then the right-clipped reads could align
+# downstream of the left-clipped reads.
 check_ins <- function(x, sample_id) {
     side <- NULL
     pos <- NULL
     count <- NULL
 
     region <- x$region
-    sr <- x$sr$mat[sample_id == sample_id & count >= MIN_SR_SUPPORT, ]
-    left_sr <- sr[abs(region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
-    right_sr <- sr[abs(region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
+    target <- sample_id
+    sr <- x$sr$mat[sample_id == target & count >= MIN_SR_SUPPORT, ]
+    right_clipped <- sr[abs(region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
+    left_clipped <- sr[abs(region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
 
-    nrow(left_sr) > 0 && nrow(right_sr) > 0 && any(left_sr$pos <= right_sr$pos)
+    nrow(right_clipped) > 0 && nrow(left_clipped) > 0
 }
 
 new_svevidence <- function(contig, start, end, pe, sr, rd, svtype, pad, sr_pad) {
