@@ -346,7 +346,12 @@ check_dup <- function(x, sample_id) {
     left_sr <- sample_sr[abs(x$region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
     right_sr <- sample_sr[abs(x$region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
     sr_combo <- expand.grid(left_sr$pos, right_sr$pos)
-    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0 && any(sr_combo$Var1 < sr_combo$Var2)
+    if (nrow(left_sr) == 0 || nrow(right_sr) == 0) {
+        has_sr_support <- FALSE
+    } else {
+        spanning_sr <- sr_combo[sr_combo$Var1 < sr_combo$Var2 & region$start <= sr_combo$Var2 & region$end >= sr_combo$Var1, ]
+        has_sr_support <- nrow(spanning_sr) > 0
+    }
 
     svlen <- region$end - region$start + 1
     if (svlen <= SMALL_CNV_MAX) {
@@ -401,7 +406,12 @@ check_del <- function(x, sample_id) {
     left_sr <- sample_sr[abs(x$region$start - pos) <= MAX_SR_BREAKPOINT_DIST & side == "right", ]
     right_sr <- sample_sr[abs(x$region$end - pos) <= MAX_SR_BREAKPOINT_DIST & side == "left", ]
     sr_combo <- expand.grid(left_sr$pos, right_sr$pos)
-    has_sr_support <- nrow(left_sr) > 0 && nrow(right_sr) > 0 && any(sr_combo$Var1 < sr_combo$Var2)
+    if (nrow(left_sr) == 0 || nrow(right_sr) == 0) {
+        has_sr_support <- FALSE
+    } else {
+        spanning_sr <- sr_combo[sr_combo$Var1 < sr_combo$Var2 & region$start <= sr_combo$Var2 & region$end >= sr_combo$Var1, ]
+        has_sr_support <- nrow(spanning_sr) > 0
+    }
 
     svlen <- region$end - region$start + 1
     if (svlen <= SMALL_CNV_MAX) {
