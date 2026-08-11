@@ -17,8 +17,8 @@ query.tabix_handle <- function(x, contig, start, end) {
         "tabix",
         args = c(
             "--print-header",
-            x$path,
-            sprintf("%s:%d-%d", contig, start, end)
+            shQuote(x$path),
+            shQuote(sprintf("%s:%d-%d", contig, start, end))
         ),
         stdout = results,
         env = sprintf("GCS_OAUTH_TOKEN=%s", get_gc_access_token())
