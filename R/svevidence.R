@@ -26,7 +26,7 @@ MIN_RD_DEVIATION <- 0.3
 
 # maximum distance from a breakpoint that a PE read alignment can be to be
 # evaluated for supporting an event
-MAX_PE_BREAKPOINT_DIST <- 500
+MAX_PE_BREAKPOINT_DIST <- 300
 
 #' Structural variant evidence files
 #'
