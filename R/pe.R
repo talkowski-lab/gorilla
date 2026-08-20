@@ -65,7 +65,7 @@ c.pe_mat <- function(...) {
         return(NULL)
     }
 
-    if (length(dots) < 1) {
+    if (length(dots) == 1) {
         return(dots[[1]])
     }
 
