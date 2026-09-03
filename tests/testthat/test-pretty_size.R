@@ -1,0 +1,11 @@
+test_that("sizes in bases are formatted correctly", {
+    expect_equal(pretty_size(512), "512 b")
+    expect_equal(pretty_size(1000), "1000 b")
+    expect_equal(pretty_size(50000), "50.00 Kb")
+    expect_equal(pretty_size(50001), "50.00 Kb")
+    expect_equal(pretty_size(50010), "50.01 Kb")
+    expect_equal(pretty_size(100000), "100.00 Kb")
+    expect_equal(pretty_size(300000), "0.30 Mb")
+    expect_equal(pretty_size(1000000), "1.00 Mb")
+    expect_equal(pretty_size(80200000), "80.20 Mb")
+})
